@@ -1,0 +1,5 @@
+numpy>=1.20
+matplotlib>=3.5
+scipy>=1.7
+npTDMS>=1.6
+slack_sdk>=3.0

@@ -1,0 +1,24 @@
+# TDMS Slack Monitor Configuration
+
+# Glob pattern for TDMS files
+folder_pattern = "/stor2/polonaise/Run45_2025_December_UHDM/TDMS/*.tdms"
+
+# Slack bot token (starts with xoxb-)
+# Get from: https://api.slack.com/apps → Your App → OAuth & Permissions
+slack_bot_token = "xoxb-your-bot-token-here"
+
+# Slack channel ID (not the name)
+# Right-click channel → View channel details → scroll to bottom for ID
+slack_channel_id = "C0123456789"
+
+# Check interval in minutes
+check_interval_minutes = 30.0
+
+# Minimum file size in MB (smaller files are ignored)
+min_file_size_mb = 10.0
+
+# Number of segments for Welch method
+segments = 20
+
+# Maximum frequency to display in Hz
+fmax = 200.0

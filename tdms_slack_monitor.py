@@ -126,40 +126,55 @@ def compute_welch_asd(
 
 
 def create_diagnostic_plot(
-    filepath: str, segments: int = 20, fmax: float = 200.0
+    filepaths: list[str], segments: int = 20, fmax: float = 200.0
 ) -> io.BytesIO:
     """
-    Create a diagnostic plot for a TDMS file.
+    Create a diagnostic plot for one or more TDMS files.
 
     Returns:
         BytesIO buffer containing the PNG image.
     """
-    tdms_data, tdms_props = read_tdms(filepath)
+    all_data = []
+    all_times = []
+    fs = None
+    unit_string = "V"
 
-    # Construct time axis
-    dt = tdms_props["wf_increment"]
-    fs = 1.0 / dt
-    start_time = tdms_props["wf_start_time"]
-    time_axis = np.arange(
-        start_time,
-        start_time + len(tdms_data) * np.timedelta64(int(dt * 1e9), "ns"),
-        np.timedelta64(int(dt * 1e9), "ns"),
-        dtype=np.datetime64,
-    )
+    for filepath in filepaths:
+        tdms_data, tdms_props = read_tdms(filepath)
+        dt = tdms_props["wf_increment"]
+        fs = 1.0 / dt
+        start_time = tdms_props["wf_start_time"]
+        unit_string = tdms_props.get("unit_string", "V")
 
-    # Compute ASD
-    freqs, asd = compute_welch_asd(tdms_data, fs, segments)
+        time_axis = np.arange(
+            start_time,
+            start_time + len(tdms_data) * np.timedelta64(int(dt * 1e9), "ns"),
+            np.timedelta64(int(dt * 1e9), "ns"),
+            dtype=np.datetime64,
+        )
+        all_data.append(tdms_data)
+        all_times.append(time_axis)
+
+    # Concatenate all data
+    combined_data = np.concatenate(all_data)
+    combined_times = np.concatenate(all_times)
+
+    # Compute ASD from combined data
+    freqs, asd = compute_welch_asd(combined_data, fs, segments)
 
     # Create figure
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), constrained_layout=True)
 
     # Time series plot
-    ax1.plot(time_axis, tdms_data, linewidth=0.5, color="cornflowerblue")
+    ax1.plot(combined_times, combined_data, linewidth=0.5, color="cornflowerblue")
     ax1.xaxis.set_major_formatter(mdates.DateFormatter("%y-%m-%d; %H:%M"))
     ax1.xaxis.set_major_locator(mdates.AutoDateLocator(maxticks=6))
     ax1.set_xlabel("UTC (YY-MM-DD; hh:mm)")
-    ax1.set_ylabel(tdms_props.get("unit_string", "V"))
-    ax1.set_title(pathlib.Path(filepath).name)
+    ax1.set_ylabel(unit_string)
+    if len(filepaths) == 1:
+        ax1.set_title(pathlib.Path(filepaths[0]).name)
+    else:
+        ax1.set_title(f"Combined: {len(filepaths)} file(s)")
     ax1.grid(True, alpha=0.3)
 
     # ASD plot
@@ -186,18 +201,28 @@ def post_image_to_slack(
     client: WebClient,
     channel_id: str,
     image_buffer: io.BytesIO,
-    filename: str,
+    filenames: list[str],
 ) -> bool:
     """Post an image to Slack using the Slack API."""
     try:
+        if len(filenames) == 1:
+            title = f"Diagnostic: {filenames[0]}"
+            comment = f"📊 New TDMS file: `{filenames[0]}`"
+            plot_filename = f"{filenames[0]}.png"
+        else:
+            title = f"Diagnostic: {len(filenames)} files"
+            file_list = "\n".join(f"• `{f}`" for f in filenames)
+            comment = f"📊 New TDMS files ({len(filenames)}):\n{file_list}"
+            plot_filename = "consolidated_diagnostic.png"
+
         client.files_upload_v2(
             channel=channel_id,
             file=image_buffer,
-            filename=f"{filename}.png",
-            title=f"Diagnostic: {filename}",
-            initial_comment=f"📊 New TDMS file: `{filename}`",
+            filename=plot_filename,
+            title=title,
+            initial_comment=comment,
         )
-        logger.info(f"Posted plot to Slack: {filename}")
+        logger.info(f"Posted plot to Slack: {len(filenames)} file(s)")
         return True
     except SlackApiError as e:
         logger.error(f"Slack API error: {e.response['error']}")
@@ -238,18 +263,18 @@ def find_new_files(
     return new_files
 
 
-def process_file(filepath: str, config: MonitorConfig) -> io.BytesIO | None:
-    """Process a single TDMS file and return the plot buffer."""
-    logger.info(f"Processing: {filepath}")
+def process_files(filepaths: list[str], config: MonitorConfig) -> io.BytesIO | None:
+    """Process TDMS files and return the plot buffer."""
+    logger.info(f"Processing {len(filepaths)} file(s)")
 
     try:
         return create_diagnostic_plot(
-            filepath,
+            filepaths,
             segments=config.segments,
             fmax=config.fmax,
         )
     except Exception as e:
-        logger.error(f"Failed to process {filepath}: {e}")
+        logger.error(f"Failed to process files: {e}")
         return None
 
 
@@ -289,15 +314,16 @@ def run_monitor(config: MonitorConfig) -> None:
             if new_files:
                 logger.info(f"Found {len(new_files)} new file(s)")
 
+                buf = process_files(new_files, config)
+                filenames = [pathlib.Path(f).name for f in new_files]
+
+                if buf is not None:
+                    post_image_to_slack(client, config.slack_channel_id, buf, filenames)
+
+                # Mark all as processed even if plotting failed (avoid retry loop)
                 for filepath in new_files:
-                    buf = process_file(filepath, config)
                     path = pathlib.Path(filepath)
                     sig = FileSignature.from_path(path)
-
-                    if buf is not None:
-                        post_image_to_slack(client, config.slack_channel_id, buf, path.name)
-
-                    # Mark as processed even if plotting failed (avoid retry loop)
                     state.mark_processed(filepath, sig)
             else:
                 logger.info("No new files")

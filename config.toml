@@ -22,3 +22,6 @@ segments = 20
 
 # Maximum frequency to display in Hz
 fmax = 200.0
+
+# Output file
+output_file = "./last_plot.png"

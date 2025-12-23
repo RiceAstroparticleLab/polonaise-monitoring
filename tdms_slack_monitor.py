@@ -47,6 +47,7 @@ class MonitorConfig:
     min_file_size_mb: float = 10.0
     segments: int = 20
     fmax: float = 200.0
+    output_file: str | None = None
 
 
 @dataclass
@@ -136,6 +137,7 @@ def create_diagnostic_plot(
     """
     all_data = []
     all_times = []
+    all_asds = []
     fs = None
     unit_string = "V"
 
@@ -156,13 +158,14 @@ def create_diagnostic_plot(
         all_data.append(tdms_data)
         all_times.append(time_axis)
 
-    # Concatenate all data
+        # Compute ASD for each file individually
+        logger.info(f"Computing Spectral Density for file {i + 1}...")
+        freqs, asd = compute_welch_asd(tdms_data, fs, segments)
+        all_asds.append((freqs, asd, pathlib.Path(filepath).name))
+
+    # Concatenate time series data for plotting
     combined_data = np.concatenate(all_data)
     combined_times = np.concatenate(all_times)
-
-    logger.info("Computing Spectral Density...")
-    # Compute ASD from combined data
-    freqs, asd = compute_welch_asd(combined_data, fs, segments)
 
     # Create figure
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), constrained_layout=True)
@@ -179,9 +182,10 @@ def create_diagnostic_plot(
         ax1.set_title(f"Combined: {len(filepaths)} file(s)")
     ax1.grid(True, alpha=0.3)
 
-    # ASD plot
-    freq_mask = freqs <= fmax
-    ax2.plot(freqs[freq_mask], asd[freq_mask], linewidth=0.8, color="cornflowerblue")
+    # ASD plot - one trace per file
+    for freqs, asd, name in all_asds:
+        freq_mask = freqs <= fmax
+        ax2.plot(freqs[freq_mask], asd[freq_mask], linewidth=0.8, label=name)
     ax2.set_xlim(0, fmax)
     ax2.set_yscale("log")
     ax2.set_xlabel("Frequency (Hz)")
@@ -189,6 +193,8 @@ def create_diagnostic_plot(
     ax2.xaxis.set_major_locator(MultipleLocator(fmax / 10))
     ax2.xaxis.set_minor_locator(MultipleLocator(fmax / 100))
     ax2.grid(True, which="both", alpha=0.2)
+    if len(filepaths) > 1:
+        ax2.legend(fontsize="small", loc="upper right")
 
     # Save to buffer
     buf = io.BytesIO()
@@ -270,11 +276,19 @@ def process_files(filepaths: list[str], config: MonitorConfig) -> io.BytesIO | N
     logger.info(f"Processing {len(filepaths)} file(s)")
 
     try:
-        return create_diagnostic_plot(
+        buf = create_diagnostic_plot(
             filepaths,
             segments=config.segments,
             fmax=config.fmax,
         )
+
+        # Save to disk if output_file is configured
+        if config.output_file:
+            with open(config.output_file, "wb") as f:
+                f.write(buf.getvalue())
+            logger.info(f"Saved plot to {config.output_file}")
+
+        return buf
     except Exception as e:
         logger.error(f"Failed to process files: {e}")
         return None

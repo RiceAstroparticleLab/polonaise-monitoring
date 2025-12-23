@@ -267,9 +267,9 @@ def run_monitor(config: MonitorConfig) -> None:
     client = WebClient(token=config.slack_bot_token)
     state = ProcessedFileState()
 
-    # Seed state with most recent 10 files to avoid reprocessing on restart
+    # Seed state with most recent 20 files; process most recent 10
     all_files = get_sorted_files(config.folder_pattern, min_size_bytes)
-    recent_files = all_files[-10:] if len(all_files) > 10 else all_files
+    recent_files = all_files[:-10] if len(all_files) > 10 else all_files
     state.seed_from_files(recent_files)
     logger.info(f"Seeded state with {len(recent_files)} recent file(s)")
 

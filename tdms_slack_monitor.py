@@ -139,7 +139,8 @@ def create_diagnostic_plot(
     fs = None
     unit_string = "V"
 
-    for filepath in filepaths:
+    for i, filepath in enumerate(filepaths):
+        logger.info(f"Reading TDMS file: {filepath}, file {i + 1} of {len(filepaths)}")
         tdms_data, tdms_props = read_tdms(filepath)
         dt = tdms_props["wf_increment"]
         fs = 1.0 / dt

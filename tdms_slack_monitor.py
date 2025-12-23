@@ -160,6 +160,7 @@ def create_diagnostic_plot(
     combined_data = np.concatenate(all_data)
     combined_times = np.concatenate(all_times)
 
+    logger.info("Computing Spectral Density...")
     # Compute ASD from combined data
     freqs, asd = compute_welch_asd(combined_data, fs, segments)
 
